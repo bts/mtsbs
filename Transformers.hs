@@ -193,3 +193,40 @@ eval5 (App e1 e2) =
 
 -- let exampleExp = Lit 12 `Plus` (App (Abs "x" (Var "x")) (Lit 4 `Plus` Lit 2))
 -- runEval5 Map.empty 0 $ eval5 exampleExp
+
+-- eval6, which replaces Identity with IO so we can add printlines
+
+type Eval6 a = ReaderT Env (ExceptT String (WriterT [String] (StateT Integer IO))) a
+
+runEval6 :: Env -> Integer -> Eval6 a -> IO ((Either String a, [String]), Integer)
+runEval6 env st ev = runStateT (runWriterT (runExceptT (runReaderT ev env))) st
+
+eval6 :: Exp -> Eval6 Value
+eval6 (Lit i) = do tick
+                   liftIO $ print i
+                   return $ IntVal i
+eval6 (Var n) = do tick
+                   tell [n]
+                   mv <- reader $ Map.lookup n
+                   case mv of
+                    Just v -> return v
+                    Nothing -> throwError $ "unbound variable: " ++ n
+eval6 (Plus e1 e2) = do tick
+                        v1 <- eval6 e1
+                        v2 <- eval6 e2
+                        case (v1, v2) of
+                         (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+                         _ -> throwError "type error in addition"
+eval6 (Abs n e) = do tick
+                     env <- ask
+                     return $ FunVal env n e
+eval6 (App e1 e2) =
+  do tick
+     v1 <- eval6 e1
+     v2 <- eval6 e2
+     case v1 of
+      FunVal env' n body -> local (const (Map.insert n v2 env')) $ eval6 body
+      _ -> throwError "type error in application"
+
+-- let exampleExp = Lit 12 `Plus` (App (Abs "x" (Var "x")) (Lit 4 `Plus` Lit 2))
+-- runEval6 Map.empty 0 $ eval6 exampleExp
